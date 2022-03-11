@@ -1,0 +1,141 @@
+---
+title: "MYC-ITD Differential Expression Analysis"
+author: "Jenny Smith"
+date: "April 25, 2017"
+output: pdf_document
+---
+
+
+Purpose: To idetify if TERT gene is differentially expressed in MYC-ITD positive patients. 
+
+```{r setup}
+library(knitr)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.align='center')
+knitr::opts_knit$set(root.dir = 'H:/COG_Meetings_Analysis/2017.04.21_TARGET_AML_cKITpatients/')
+```
+
+
+```{r message = FALSE, warning=FALSE}
+library(survival)
+library(RColorBrewer)
+
+library(stringr)
+library(dplyr)
+library(magrittr)
+
+
+getwd()
+```
+
+
+```{r}
+source("H:/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/Limma_DE_Function.r")
+```
+
+
+#Read in the clinical data with the MYC-ITD
+```{r}
+MYC <- read.csv("H:/COG_Meetings_Analysis/2017.04.21_TARGET_AML_cKITpatients/New_stratification_outcomes_updatedbyJS_2017.04.25.csv", stringsAsFactors = FALSE)
+
+
+head(MYC[,c(1:3,9)])
+```
+
+
+
+#high Depth diagnostic Samples
+```{r}
+HD_counts <- get(load("H:/RNA_seq_Analysis/2017.04.14_TARGET_AML_correlationMSLN/ExpressionData/Dx_rawcounts_FilteredLowCounts_withGeneSymbol_TARGET_AML_Aug2014.RData"))
+
+dim(HD_counts)
+```
+
+```{r}
+head(HD_counts[,1:5])
+```
+
+
+#low Depth Diagnosic Samples
+```{r}
+LD_counts <- get(load("H:/RNA_seq_Analysis/2017.04.14_TARGET_AML_correlationMSLN/ExpressionData/combatAdjustedExp.RData"))
+LD_counts[which(LD_counts < 0, arr.ind=TRUE)] <- 0
+
+dim(LD_counts)
+```
+
+```{r}
+head(LD_counts[,1:5])
+```
+
+
+
+#Define the groups 
+```{r}
+MYC_pos <- MYC[which(MYC$MYC_ITD == "Yes"), ]
+MYC_pos$patientID #20 patients. 
+```
+
+```{r}
+MYC_neg <- MYC[which(MYC$MYC_ITD == "No"), ]
+length(MYC_neg$patientID) #502 patients
+```
+
+
+```{r}
+length(which(colnames(HD_counts) %in% MYC_pos$patientID))
+length(which(colnames(HD_counts) %in% MYC_neg$patientID))
+```
+
+I Will proceed with the Low Depth RNA-sequencing data only. 
+```{r}
+length(which(colnames(LD_counts) %in% MYC_pos$patientID))
+length(which(colnames(LD_counts) %in% MYC_neg$patientID))
+
+pos <- colnames(LD_counts)[which(colnames(LD_counts) %in% MYC_pos$patientID)] #11
+neg <- colnames(LD_counts)[which(colnames(LD_counts) %in% MYC_neg$patientID)] #292 
+```
+
+#Raw  Counts of TERT 
+```{r message=FALSE, warning=FALSE}
+status <- c(rep("pos", length(pos)), rep("neg", length(neg)))
+tert <- data.frame(tert=log2(LD_counts["TERT", c(pos,neg)] + 1), 
+                   status=status)
+
+ggplot(tert, aes(x=status, y=tert, fill=status)) + geom_boxplot() + scale_y_continuous(limits = c(0,10)) + labs(title="TERT Expression in MYC-ITD AML", x="MYC-ITD Status", y="Log2 Read Counts") + theme_bw()
+```
+
+
+#Perform the differential Expression. 
+
+```{r message=FALSE, warning=FALSE}
+DE <- calcDE(LD_counts[,c(pos,neg)], pos, neg, logCPM = FALSE)
+
+summary(DE)
+```
+
+
+```{r}
+dim(DE$dge)
+```
+
+```{r}
+DE$design[1:15,]
+```
+
+```{r}
+dim(DE$DE)
+```
+
+
+```{r}
+DE$DE[1:10,]
+```
+
+
+```{r}
+# write.csv(DE$DE, file="TARGET_AML_MYC-ITD_DEGs_BatchCorrected_CPMgreaterthan1Filter_25April2017.csv")
+```
+
+
+
+

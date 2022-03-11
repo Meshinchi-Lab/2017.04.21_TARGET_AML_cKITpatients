@@ -1,0 +1,271 @@
+---
+title: "EFS Survival Analysis \n COG meeting Spring 2017 "
+author: "Jenny Smith"
+date: "April 25, 2017"
+output: pdf_document
+---
+
+Purpose: To create EFS curves to identify if new CKIT patients or MYC-ITD which are associated with patient outcome. 
+
+```{r setup}
+library(knitr)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.align='center')
+knitr::opts_knit$set(root.dir = 'H:/COG_Meetings_Analysis/2017.04.21_TARGET_AML_cKITpatients/')
+```
+
+
+```{r message = FALSE, warning=FALSE}
+library(survival)
+library(RColorBrewer)
+library(colorspace)
+library(stringr)
+library(Biobase)
+library(dplyr)
+library(magrittr)
+library(tables)
+getwd()
+```
+
+
+```{r}
+source("H:/scripts/Survival_Analysis/Survplot_Functions.r")
+```
+
+
+#Read in the clinical data with the new classification strategy
+```{r comment="", tidy=TRUE, size="tiny"}
+# newClassification <- read.csv("New_stratification_outcomes_updated)_(003).csv")
+
+newClassification <- read.csv("H:/reference_mapping-files/New_stratification_outcomes_updated_2017.03.28.csv", stringsAsFactors = FALSE)
+
+head(newClassification[,c(1,9:12)])
+```
+
+```{r}
+dim(newClassification)
+```
+
+
+#Combine the new C-Kit Mutations to see if we add any new Patiets.
+
+```{r}
+kit <- read.csv("cKit_Allmutations.csv", stringsAsFactors = FALSE)
+head(kit[,1:6]) #note many repeated patient USIs 
+```
+
+```{r}
+#Identify which KITs are already in the new classification scheme
+KIT_newClass <- newClassification[which(grepl("KIT",  newClassification$Reason)), ]$TARGET.USI
+length(which(! kit$patientID %in%  KIT_newClass )) #22 not included already
+```
+
+```{r}
+#must remove duplicates or it will be duplicated in the merge.
+kit <- kit[which(!kit$patientID %in% KIT_newClass), ]
+kit <- kit[which(! duplicated(kit$patientID)), ]  
+
+dim(kit)
+```
+
+```{r}
+newClassUpdate <- merge(kit[,1:2], newClassification, by.x = "patientID", by.y="TARGET.USI",  all.y=TRUE)
+
+newClassUpdate[90:100,c(1:2,11)]
+```
+
+```{r}
+#if "gene" column is.na() then leave reason as is. else add +KIT to the string. 
+newClassUpdate$Reason <- ifelse(is.na(newClassUpdate$gene), newClassUpdate$Reason, sprintf("%s + KIT", newClassUpdate$Reason))
+
+#remove the "gene" column 
+newClassUpdate <- newClassUpdate[,-2] 
+
+newClassUpdate[90:100,c(1,10)]
+```
+
+#Add MYC-ITD to New Stratification
+
+```{r}
+MYC_ITD <- read.csv("H:/COG_Meetings_Analysis/2017.04.21_TARGET_AML_cKITpatients/MYC_ITD_0531_prevalence _21216.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+newClassUpdate <- merge(MYC_ITD[, c("Reg.", "MYC.TD.by.DNA")], newClassUpdate, by.x = "Reg.", by.y = "Reg.", all.y = TRUE)
+
+dim(newClassUpdate)
+```
+
+```{r}
+newClassUpdate$MYC_ITD <- ifelse(is.na(newClassUpdate$MYC.TD.by.DNA), "Unknown", newClassUpdate$MYC.TD.by.DNA ) %>% { gsub("yes.+", "Yes", . ) } %>% { gsub("^no", "No", . ) }
+```
+
+
+```{r}
+newClassUpdate <- newClassUpdate[, -2] #remove the extra column 
+```
+
+
+```{r}
+newClassUpdate[90:100,c(2,10,82)]
+```
+
+#Save the new classifications update
+
+```{r}
+write.csv(newClassUpdate, file="New_stratification_outcomes_updatedbyJS_2017.04.25.csv", row.names = FALSE)
+```
+
+
+
+#Define Functions for subsetting and KM curves
+
+##Customize the output of SurvivalPlot() function. 
+SurvivalPlot is a function that is my generic version in Survplot_Functions.r
+```{r}
+CustomPlot <- function(fit, diff, color){
+    
+    #label with number of patients
+    if (length(fit$n) == 1){
+      Num <- paste("n =", fit$n, sep = " ")
+    }else{
+      obs <- fit$n[1] + fit$n[2]
+      Num <- paste("n =", obs, sep = " ")
+    }
+    
+    #X axis position for Num
+    pos <- (max(fit$time)*0.75)
+    
+    #label with pvalue
+    pVal <- 1-pchisq(diff$chisq, (length(diff$n)-1))
+    pVal <- round(pVal, digits = 4)
+    
+    if (pVal < 0.001){
+      p <- "p < 0.001"
+    }else{
+      p <- paste("p =", pVal, sep = " ")
+    }
+    
+    #customized plot 
+    if (length(color > 1)){
+      efs_plot <- SurvivalPlot(fit, "Mutation Status", "Years",color)
+    }else{
+      efs_plot <- SurvivalPlot(fit, "NA", "Years",color)
+    }
+
+    efs_plot <- efs_plot + annotate(geom="text", x=pos, y=1.0, label= Num, size=6)
+    
+    #return the ggplot object
+    return(efs_plot)
+}
+```
+
+
+#Kaplan-Meier Curves of EFS (Event Free Survival)
+
+#Survival Analysis for MYC-ITD with known status as present or absent. 
+
+```{r}
+knownMYCStatus <- newClassUpdate[which(grepl("Yes|No", newClassUpdate$MYC_ITD)), ]
+```
+
+
+```{r}
+# SA_list <- list()
+# for (type in c("EFS", "OS")){
+#   SA <- SurvObjects(knownMYCStatus, "MYC_ITD", 1, type)
+#   plot <- efsCustomPlot(SA[[1]], c("royalblue", "darkorchid"))
+#   title <- paste(c(type, "in Patients with MYC-ITD"), sep=" ")
+#   plot$labels$title <- title
+}
+```
+
+
+```{r}
+MYC_SA <- SurvObjects(knownMYCStatus, "MYC_ITD", 1, "EFS")
+
+MYC_SA
+```
+
+```{r}
+MYC_EFS <- efsCustomPlot(MYC_SA[[1]], c("royalblue", "darkorchid"))
+
+MYC_EFS$labels$title <- "Event Free Survival in Patients with MYC-ITD"
+
+MYC_EFS <- MYC_EFS + annotate("text", x=0.5, y=0.08, label= c("p = 0.155"))
+
+MYC_EFS
+```
+
+#MYC-ITD Present Against all others
+```{r}
+MYC_Vs_All <- newClassUpdate
+MYC_Vs_All$MYC_ITD <- ifelse(MYC_Vs_All$MYC_ITD == "Yes", MYC_Vs_All$MYC_ITD, "All Others" )
+```
+
+```{r}
+MYC_vsAll_SA <-  SurvObjects(MYC_Vs_All, "MYC_ITD", 1, "EFS")
+
+MYC_vsAll_SA
+```
+
+```{r}
+efsCustomPlot(MYC_vsAll_SA[[1]], c("royalblue", "darkorchid")) + annotate("text", x=0.5, y=0.08, label= c("p = 0.099 ")) + labs(title="Event Free Survival in Patients with MYC-ITD")
+```
+
+#cKit Mutations efs
+
+```{r}
+group1 <- newClassUpdate[which(grepl("RUNX1-RUNX1T1 \\+ KIT", newClassUpdate$Reason) | grepl("CBFB-MYH11 \\+ KIT", newClassUpdate$Reason)), ]
+
+CBF_KIT <- rep("CBF and cKIT", nrow(group1))
+
+group1 <- cbind(CBF_KIT, group1)
+```
+
+```{r}
+group2 <- newClassUpdate[which(grepl("RUNX1-RUNX1T1", newClassUpdate$Reason) | grepl("CBFB-MYH11", newClassUpdate$Reason)), ]
+
+group2 <- group2[ ! group2$TARGET.USI %in% group1$TARGET.USI, ]
+
+CBF_KIT <- rep("CBF Alone", nrow(group2))
+
+group2 <- cbind(CBF_KIT, group2)
+```
+
+```{r}
+dim(group1)
+dim(group2)
+```
+
+
+```{r}
+KIT_df <- rbind(group1,group2)
+
+head(KIT_df[,c(1,9:12)])
+```
+
+### Survival analysis
+```{r message=FALSE, warning=FALSE}
+KIT_SA <- SurvObjects(KIT_df, "CBF_KIT", 1, "EFS")
+
+KIT_SA
+```
+
+
+### KM plots
+
+```{r message=FALSE, warning=FALSE}
+# KIT <- SurvivalPlot(KIT_SA[[1]], "Mutation Status", "Year", c("dodgerblue4","darkturquoise"))
+KIT <- efsCustomPlot(KIT_SA[[1]],  c("dodgerblue4","darkturquoise"))
+```
+
+```{r}
+KIT$labels$title <- "Event Free Survival in \n Patients with CBF and cKIT Mutations"
+
+KIT
+```
+
+
+
+
+
